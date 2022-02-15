@@ -16,9 +16,11 @@ plt.ion()
 
 #set up basic parameters for the upchannelization we want to do.
 nchan=1025
-ntap_coarse=4
-ntap_fine=2
 nn=2*(nchan-1)
+
+ntap_coarse=4 #how many taps to use in the coarse PFB
+ntap_fine=2  #how many taps to use in the fine PFB
+osamp=16 #this is the factor by which we wish to upchannelize
 
 #pick a random coarse channel (range).  It should not 
 #matter which channel one picks (away from the first/last)
@@ -29,7 +31,6 @@ kmax=344
 mat=pfb_tools.get_pfb_mat(nchan,ntap_coarse,kmin=kmin,kmax=kmax)
 
 #find the matrix that converts time samples to the fine PFB
-osamp=16
 kkmin=kmin*osamp-osamp//2
 kkmax=kmax*osamp+osamp//2-1
 mat_fine=pfb_tools.get_pfb_mat(1+(nchan-1)*osamp,ntap_fine,kmin=kkmin,kmax=kkmax)
@@ -48,25 +49,31 @@ rhs=np.conj(mat_osamp)@(mat_fine.T)
 nbit=4 #number of bits we expect in the coarsely channelized PFB
 amp=np.mean(np.diag(lhs))/(4**nbit)
 
+#this is the matrix that will upchannelize the coarse PFB
+#actually, it's the transpose of the matrix, given how the 
+#other matrices were generated
 filt_mat=np.linalg.inv(lhs+amp*np.eye(lhs.shape[0]))@rhs
 
-
+#we'll generate a chirp that goes from coarse channels k0 to k1
 k0=60
 k1=70
 
-nsamp=2**24
+nsamp=2**24 #number of samples in the chirp
+
 dt=1+np.linspace(0,(k1/k0)-1,nsamp) #let's make a frequency sweep
 tvec=np.cumsum(dt)
-
 dat=np.sin(2*np.pi*k0/nn*tvec)
+
+#the PFB of our chirp
 pfb_coarse=pfb_tools.pfb_data(dat,nchan,ntap_coarse)
 
-
+#roughly how many output blocks of the fine PFB we're going to have
 nn_fine=nn*osamp
 nchunk_fine=pfb_coarse.shape[0]//osamp-ntap_fine #this is extra conservative
 #i=0
 #flub=pfb_coarse[(osamp*i):(osamp*(i+ntap_fine)),:]
 
+#how many coarse blocks go into one fine block
 n_mult=osamp*ntap_fine-ntap_coarse+1
 n_mult=n_mult*(kmax-kmin+1)
 print(filt_mat.shape[0],n_mult)
@@ -75,19 +82,21 @@ print(filt_mat.shape[0],n_mult)
 #multiplying by the upchannelization matrix.  
 pfb_fine=[filt_mat.T@pfb_coarse[(osamp*i):(osamp*i+n_mult),:] for i in range(nchunk_fine)]
 
-#each block is now nfine by nchan, so we want to ravel them to get into single time slices
+#each output block is now nfine by nchan, so we want to ravel them to get into single time slices
 #right now the fast index is coarse frequency, so take a transpose before ravelling
 pfb_fine=[np.ravel(block.copy().T) for block in pfb_fine]
 
 #finally, turn into an array
 pfb_fine=np.asarray(pfb_fine)
 
+#show our coarse PFB
 plt.figure(1)
 plt.clf();
 plt.imshow(np.abs(pfb_coarse[:,k0:k1]));
 plt.axis('auto');
 plt.show()
 
+#show our upchannelized data
 plt.figure(2)
 plt.clf()
 plt.imshow(np.abs(pfb_fine[:,(k0*osamp):(k1*osamp)]));
